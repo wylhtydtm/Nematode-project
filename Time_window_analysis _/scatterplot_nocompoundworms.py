@@ -11,7 +11,7 @@ Produce a scatter plot showing p values for all feeatures with different window 
 
 import numpy as np
 import pandas as pd
-import os, time
+import os
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from pathlib import Path

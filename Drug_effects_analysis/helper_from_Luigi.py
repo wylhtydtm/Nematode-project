@@ -554,5 +554,195 @@ def select_meta(df, filter_dic):
         
     return df_
 
+def my_sum_bootstrap(data, alpha=95):
+    if isinstance(data, pd.core.series.Series):
+        data_clean = data.values
+        data_clean = data_clean[~np.isnan(data_clean)]
+    else:
+        data_clean = data[~np.isnan(data)]
+    stafunction = np.sum
+    n_samples = 1000
+    funevals = np.ones(n_samples) * np.nan
+    maxint = len(data_clean)
+    sampling = np.random.randint(0, maxint, size=(n_samples, maxint))
+    for evalc, sampling_ind in enumerate(sampling):
+        funevals[evalc] = stafunction(data_clean[sampling_ind])
+    pctiles = np.percentile(funevals, (50 - alpha/2, 50 + alpha/2))
+    return tuple(pctiles)
 
+
+def get_frac_motion_modes_with_ci(df, is_for_seaborn=False):
+    """get_frac_motion_modes_with_ci
+    divide number of worms in a motion mode by
+    the total number of worms in that frame.
+    Does *not* require that data have already been consolidated
+    by a .groupby('timestamp')
+    """
+    # sum all n_worms across wells
+    total_n_worms_in_frame = df.groupby(
+        ['worm_strain', 'timestamp'], observed=True)['n_worms'].transform(sum)
+    tmp = df.drop(columns='n_worms')
+    # transform n_worms in frac_worms
+    tmp = tmp.divide(total_n_worms_in_frame, axis=0)
+    tmp.rename(lambda x: x.replace('n_worms_', 'frac_worms_'),
+               axis='columns',
+               inplace=True)
+    if is_for_seaborn:
+        # will use seaborn to get confidence intervals (estimator=sum),
+        # don't need to calculate them here
+        return tmp
+
+    # implied else
+    # now use bootstrap to get CIs
+    out = tmp.groupby(['worm_strain', 'timestamp'],
+                      observed=True).agg([np.sum, my_sum_bootstrap])
+
+    def col_renamer(cname):
+        cname_out = cname[0]+'_ci' if ('ci' in cname[1] or
+                                       'bootstrap' in cname[1]) else cname[0]
+        return cname_out
+    out.columns = [col_renamer(c) for c in out.columns]
+
+    return out
+
+def plot_frac(df, modecolnames, ax=None, **kwargs):
+    """plot_frac
+    plots modecolname of df with shaded errorbar
+    example:
+        plot_frac(frac_motion_mode_with_ci, 'frac_worms_fw', ax=ax)
+    """
+    if ax is None:
+        ax = plt.gca()
+    coldict = {'frac_worms_fw': 'tab:green',
+               'frac_worms_st': 'tab:purple',
+               'frac_worms_bw': 'tab:orange',
+               'frac_worms_nan': 'tab:gray'}
+    namesdict = {'frac_worms_fw': 'forwards',
+                 'frac_worms_st': 'stationary',
+                 'frac_worms_bw': 'backwards',
+                 'frac_worms_nan': 'not defined'}
+    styledict = {'N2': '--',
+                 'CB4856': '-'}
+    if len(ax) != 1:
+        assert(len(ax) == df['worm_strain'].nunique())
+
+    for ii, (strain, df_g) in enumerate(df.groupby('worm_strain')):
+        # df_g = df_g.droplevel('worm_strain')
+        if len(ax) != 1:
+            this_ax = ax[ii]
+        else:
+            this_ax = ax
+        for col in modecolnames:
+            df_g.plot(x='time_s',
+                      y=col, ax=this_ax,
+                      color=coldict[col],
+                      label='_nolegend_',
+                      **kwargs)
+                      # linestyle=styledict[strain],
+                      # label=strain+' '+col.split('_')[-1],
+
+            lower = df_g[col+'_ci_lower']
+            upper = df_g[col+'_ci_upper']
+            this_ax.fill_between(x=df_g['time_s'],
+                                 y1=lower.values,
+                                 y2=upper.values,
+                                 alpha=0.3,
+                                 facecolor=coldict[col])
+        # plt.plot([-1, -1], [-1, -1], color='black',
+        #          linestyle=styledict[strain],
+        #          label=strain)
+        this_ax.set_ylabel('fraction of worms')
+        this_ax.set_xlabel('time, (s)')
+        this_ax.set_title(strain)
+        this_ax.set_ylim((0, 1))
+
+    # plt.legend(frameon=False, loc='upper left')
+        this_ax.get_legend().remove()
+    for i, col in enumerate(modecolnames):
+        xm, xM = this_ax.get_xlim()
+        x = xm + 0.99 * (xM - xm)
+        y = 0.95 - i * 0.05
+        this_ax.text(x, y, namesdict[col], color=coldict[col],
+                     fontweight='heavy',
+                     horizontalalignment='right')
+    return
+
+
+ def plot_stacked_frac_mode(df, strain=None):
+    """plot_stacked_frac_mode
+    make AoE II style cumulative fraction plot"""
+
+    if (('worm_strain' in df.index.names and
+            df.reset_index()['worm_strain'].nunique() > 1) or
+        ('worm_strain' in df.columns and
+            df['worm_strain'].nunique() > 1)):
+        fig = []
+        for strain, df_g in df.groupby('worm_strain'):
+            if 'worm_strain' in df.index.names:
+                df_g = df_g.droplevel('worm_strain')
+            ff = plot_stacked_frac_mode(df_g, strain=strain)
+            fig.append(ff)
+
+    else:
+
+        fig, ax = plt.subplots()
+        fracalpha = 0.5
+        erralpha = 0.5
+        # facecolours = [(*t, fracalpha) for t in sns.color_palette()]
+        facecolours = {'frac_worms_fw': 'tab:green',
+                       'frac_worms_st': 'tab:purple',
+                       'frac_worms_bw': 'tab:orange',
+                       'frac_worms_nan': 'tab:gray'}
+        yprev = 0
+        ycum = 0
+        for icol, col in enumerate(['frac_worms_'+x
+                                    for x in ['fw', 'st', 'bw', 'nan']]):
+            # line between fractions:
+            yprev = ycum
+            ycum = ycum + df[col]
+            ax.fill_between(x=df['time_s'],
+                            y1=yprev,
+                            y2=ycum,
+                            label=col,
+                            linewidth=0.5,
+                            linestyle='-',
+                            facecolor=facecolours[col],
+                            alpha=fracalpha,
+                            edgecolor='darkgray')
+        # now lower and upper bounds of frac fw
+        ylow = df['frac_worms_fw_ci_lower']
+        yupp = df['frac_worms_fw_ci_upper']
+        ax.fill_between(x=df['time_s'],
+                        y1=ylow,
+                        y2=yupp,
+                        facecolor='gray',
+                        edgecolor='None',
+                        alpha=erralpha,
+                        linewidth=0.2,
+                        linestyle='--')
+        # get errorbar for frac bw. then sum them to frac_fw+frac_st
+        offset = (df['frac_worms_fw']
+                  + df['frac_worms_st']
+                  - df['frac_worms_bw'])
+        ylow = df['frac_worms_bw_ci_lower'] + offset
+        yupp = df['frac_worms_bw_ci_upper'] + offset
+        # import pdb; pdb.set_trace()
+        ax.fill_between(x=df['time_s'],
+                        y1=ylow,
+                        y2=yupp,
+                        facecolor='gray',
+                        edgecolor='None',
+                        alpha=erralpha,
+                        linewidth=0.2,
+                        linestyle='--')
+
+        ax.legend(loc='lower right')
+        ax.set_ylim(0, 1)
+        ax.set_xlim(df['time_s'].min(), df['time_s'].max())
+        ax.set_ylabel('cumulative fraction')
+        ax.set_title(strain)
+
+        plot_stimuli(ax=plt.gca(), units='s')
+
+    return fig
 
