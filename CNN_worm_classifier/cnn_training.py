@@ -131,7 +131,6 @@ class ConvNet(nn.Module):
         x = self.drop_out(x)  
         x = x.view(x.shape[0], -1) # flatten output for fully connected layer, batchize,-1 do whatever it needs to be 
         x = self.fc_layers(x)# pass  through fully connected layer
-        x = F.softmax(x, dim=1) #softmax activation function on outputs, get probability disatribution on output, all ouputs add to 1
         return x 
     
 use_cuda = torch.cuda.is_available() #check if gpu is available
