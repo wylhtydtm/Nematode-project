@@ -86,6 +86,21 @@ val_list_normalized, val_label_list= zip(*b)
 train_list_fillednans= [train_list_normalized[i].fillna(-1) for i in range(len(train_list_normalized))]
 val_list_fillednans= [val_list[i]_normalized.fillna(-1) for i in range(len(val_list_normalized))]
 
+#%% ADD in signals
+
+train_list_fillednans= [train_list_fillednans[i].reset_index(drop=True)for i in range(len(train_list_fillednans))]
+val_list_fillednans= [val_list_fillednans[i].reset_index(drop=True) for i in range(len(val_list_fillednans))]
+
+new_signal= [0]* 375 + [0.05]*251 +[0]*250
+new_signal= pd.Series(new_signal)
+
+for i in range(len(train_list_fillednans)):
+    train_list_fillednans[i].insert(loc=0, column='new_signal',value= new_signal) 
+
+for i in range(len(val_list_fillednans)):
+    val_list_fillednans[i].insert(loc=0, column='new_signal',value= new_signal) 
+
+#%%
 
 list_of_foo = [df[np.newaxis,:,:] for df in train_list_fillednans]
 bigarray_foo = np.concatenate(list_of_foo, axis=0)
